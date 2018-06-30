@@ -60,7 +60,7 @@ function kbControl(_controllerOptions){
             },
         },
         action: {seek:null, play:null, pause:null, volume:null, muted:null, getCurrentTime:null, currentTime:null},
-        propAction: (target, propName) => value => {target[propName] = value},
+        propAction: (target, propName) => value => target[propName] = value,
         setAction: (video, control, actionName) => new Promise(gotTarget=>gotTarget([video, control].find(target=>actionName in target))).then(target=>{this.options.action[actionName] = !!target && typeof target[actionName] === 'function' ? target[actionName].bind(target) : this.options.propAction(target, actionName);}),
     };
     this.setPseudo = (video, control) =>{
@@ -69,18 +69,17 @@ function kbControl(_controllerOptions){
     };
     this.controllerHandler = event => {if (!document.contains(this.video)) this.run(event); else if (!['mousedown', 'wheel'].includes(event.type) || !event.path.some(el=>typeof el.matches === 'function' && el.matches(this.options.ignore))){new Promise(gotKey=>new Promise(gotPressed=>gotPressed(this.options.event.converter[event.type](event))).then(pressed=>gotKey([pressed, ...this.options.key[pressed]]))).then(([pressed, action, ...args])=>{if (this.options.valid.includes(pressed)) this.options.action[action](...args);/*console.info(pressed, action, args);*/});}};
     this.createController = (forwardedEvent, video, control) => {
+        this.options.action = {seek:null, play:null, pause:null, volume:null, muted:null, getCurrentTime:null, currentTime:null};
         this.time.unit = this.options.unit;
         Object.keys(this.options.action).forEach(actionName=>this.options.setAction(video, control, actionName));
         this.setPseudo(video, control);
         this.options.event.types.forEach(type=>document.addEventListener(type, this.controllerHandler, false));
-        if (!!forwardedEvent) forwardedEvent.target.dispatchEvent(forwardedEvent);
+        if (!!forwardedEvent && !!forwardedEvent.target) forwardedEvent.target.dispatchEvent(forwardedEvent);
     };
     this.run = event => aGet('video:not(.hasController)').then(video=>{
-        console.info(profile, profile[profile.player[document.domain]])
         if (typeof profile[profile.player[document.domain]] === 'object'){ Object.entries(profile.default).forEach(([option, value])=>{
             this.options[option] = !profile[profile.player[document.domain]][option] ? value : typeof profile[profile.player[document.domain]][option] === 'object' ? Object.assign(value, profile[profile.player[document.domain]][option]) : profile[profile.player[document.domain]][option]
         })} else this.options = profile.default;
-
         this.options.valid = Object.keys(this.options.key);
         this.video = video;
         this.video.classList.add('hasController');
