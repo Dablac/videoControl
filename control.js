@@ -34,7 +34,6 @@ const profile = {
         },
         saveTime: true,
         ignore: 'button, [class*="jw-controls"]',
-        action: {seek:null, play:null, pause:null, volume:null, muted:null, getCurrentTime:null, currentTime:null, playbackRate:null},
         getControl: video => new Promise(gotControl=>gotControl(video)),
         postAction:[{action: 'volume', args: [1.0]}, {action: 'muted', args: [false]}]
     },
@@ -125,6 +124,7 @@ function kbControl(_controllerOptions){
         });
     }};
     this.createController = (forwardedEvent, video, control) => {
+        this.options.action = {seek:null, play:null, pause:null, volume:null, muted:null, getCurrentTime:null, currentTime:null, playbackRate:null};
         this.time.unit = this.options.unit;
         Object.keys(this.options.action).forEach(actionName=>this.options.setAction(video, control, actionName));
         this.setPseudo(video, control);
