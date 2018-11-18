@@ -7,11 +7,21 @@ const profile = {
         'streamango.com': 'videojs',
         'openload.co': 'videojs',
         'oload.download': 'videojs',
+        'vidstreaming.io': 'videojs',
     },
     default:{
         unit:'s',
+        mod:{
+            active:{},//{'LMB': {standard: 'playpause', args: [void 0], used: false}}
+            'LMB':{
+                'RMB': ['playpause'],
+                'MMB': ['speed', true],
+                'WheelUp': ['speed', false, true],
+                'WheelDown': ['speed', false],
+            }
+        },
         key:{
-            'LMB': ['playpause', null],
+            'LMB': ['mod', 'playpause'],
             'RMB': ['skip', 'small'],
             'MMB': ['skip', 'big'],
             'WheelUp': ['skip', 'tiny', true],
@@ -20,10 +30,11 @@ const profile = {
             'ArrowRight': ['skip', 'small', true],
             'ArrowLeft': ['skip', 'small'],
             'ArrowDown': ['skip', 'big'],
-            ' ': ['playpause', null]
+            ' ': ['playpause']
         },
         saveTime: true,
         ignore: 'button, [class*="jw-controls"]',
+        action: {seek:null, play:null, pause:null, volume:null, muted:null, getCurrentTime:null, currentTime:null, playbackRate:null},
         getControl: video => new Promise(gotControl=>gotControl(video)),
         postAction:[{action: 'volume', args: [1.0]}, {action: 'muted', args: [false]}]
     },
@@ -31,8 +42,8 @@ const profile = {
         key:{
             'ArrowRight': ['skip', 'tiny', true],
             'ArrowLeft': ['skip', 'tiny'],
-            ' ': null,
-            'LMB': null,
+            //' ': null,
+            //'LMB': null,
         },
         ignore: '.vjs-control',
     },
@@ -43,7 +54,7 @@ const profile = {
             'ArrowLeft': null,
             ' ': null
         },
-        saveTime: false,
+        saveTime: true,
         ignore: '.bottom-controls, top-left-controls',
         getControl: () => new Promise(gotPlayerInstance=>new Promise(gotVideoPlayer=>gotVideoPlayer(netflix.appContext.state.playerApp.getAPI().videoPlayer)).then(player=>gotPlayerInstance(player.getVideoPlayerBySessionId(player.getAllPlayerSessionIds()[0])))),
     }
@@ -58,64 +69,90 @@ function kbControl(_controllerOptions){
     Object.defineProperty(this.time, 'unit', {set: input =>{this.time._unit = input}});
     Object.keys(this.time.sizes).forEach(size=>Object.defineProperty(this.time, size, {get: () => this.time.units[this.time._unit]*this.time.sizes[size]}));
     this.skip = (offset, forward) => (!this.options.action.getCurrentTime.name ? this.video.currentTime*this.time.units[this.time._unit] : this.options.action.getCurrentTime())+((2*!!forward-1)*this.time[offset]);
+    this.speed = (reset, increase) => (!reset ? this.video.playbackRate+(0.1*(2*!!increase-1)) : 1.0);
     this.options = {
         event:{
-            map: {mousedown: ['LMB', 'MMB', 'RMB'], wheel: ['WheelUp','WheelDown']},
-            types: ['keydown', 'mousedown', 'wheel'],
+            map: {mousedown: ['LMB', 'MMB', 'RMB'], mouseup: ['LMB', 'MMB', 'RMB'], wheel: ['WheelUp','WheelDown']},
+            types: ['keydown', 'keyup', 'mousedown', 'mouseup', 'wheel'],
             converter: {
                 keydown: event=>event.key,
+                keyup: event=>event.key,
                 mousedown: event=>this.options.event.map[event.type][event.button],
+                mouseup: event=>this.options.event.map[event.type][event.button],
                 wheel: event=>this.options.event.map[event.type][(1+Math.sign(event.deltaY))/2],
             },
         },
-        action: {seek:null, play:null, pause:null, volume:null, muted:null, getCurrentTime:null, currentTime:null},
-        propAction: (target, propName) => value => target[propName] = value,
-        setAction: (video, control, actionName) => new Promise(gotTarget=>gotTarget([video, control].find(target=>actionName in target))).then(target=>{this.options.action[actionName] = !!target && typeof target[actionName] === 'function' ? target[actionName].bind(target) : this.options.propAction(target, actionName);}),
+        propAction: (target, propName) => value => (target[propName] = value),
+        setAction: (video, control, actionName) => new Promise(gotTarget=>gotTarget([video, control].find(target=>actionName in target))).then(target=>(this.options.action[actionName] = !!target && typeof target[actionName] === 'function' ? target[actionName].bind(target) : this.options.propAction(target, actionName))),
     };
     this.setPseudo = (video, control) =>{
+        this.options.action.speed = (...args) => this.options.action.playbackRate(this.speed(...args));
+        this.options.action.mod = (pressed, ...[standard, args]) => (this.options.mod.active[pressed] = {standard:standard, args:args, used:false});
         this.options.action.set = (value) => (!this.options.action.seek.name ? this.options.action.currentTime : this.options.action.seek)(value*this.time.units[this.time._unit]);
         this.options.action.skip = (...args) => (!this.options.action.seek.name ? this.options.action.currentTime : this.options.action.seek)(this.skip(...args));
         this.options.action.playpause = () => video.paused ? this.options.action.play() : this.options.action.pause();
     };
-    this.controllerHandler = event => {if (!document.contains(this.video)) this.run(event); else if (!['mousedown', 'wheel'].includes(event.type) || !event.path.some(el=>typeof el.matches === 'function' && el.matches(this.options.ignore))){
+    this.controllerHandler = event => {if (!document.contains(this.video)) this.run(event); else if (!['mousedown', 'mouseup', 'wheel'].includes(event.type) || !event.path.some(el=>typeof el.matches === 'function' && el.matches(this.options.ignore))){
         new Promise(gotKey=>new Promise(gotPressed=>gotPressed(this.options.event.converter[event.type](event))).then(pressed=>gotKey([pressed, ...this.options.key[pressed]]))).then(([pressed, action, ...args])=>{
-            if (this.options.valid.includes(pressed)) this.options.action[action](...args);
-            console.info(pressed, action, args);
+            if (this.options.valid.includes(pressed)){
+                if (action !== 'mod'){
+                    if (!event.type.endsWith('up')){
+                        let activeMod = Object.keys(this.options.mod.active)[0];
+                        //Only the first (by key order) active mod is considered in order to avoid overlap in the case that multiple mod keys are defined, pressed and affect the same keys
+                        if (!activeMod){
+                            console.info(pressed, action, args);
+                            this.options.action[action](...args);
+                        } else {
+                            [this.options.mod.active[activeMod].used, action, ...args] = [true, ...this.options.mod[activeMod][pressed]];
+                            console.info(pressed, action, args);
+                            this.options.action[action](...args);
+                        }
+                    }
+                } else {
+                    if (event.type.endsWith('up')){
+                        console.info(this.options.mod.active, pressed, this.options.mod.active[pressed]);
+                        if (!this.options.mod.active[pressed].used){
+                            console.info(pressed, action, args);
+                            this.options.action[this.options.mod.active[pressed].standard](this.options.mod.active[pressed].args);
+                        }
+                        delete this.options.mod.active[pressed]
+                    } else {
+                        this.options.action[action](pressed, ...args);
+                    }
+                }
+            }
             this.options.postAction.forEach(post=>this.options.action[post.action](...post.args));
         });
     }};
     this.createController = (forwardedEvent, video, control) => {
-        this.options.action = {seek:null, play:null, pause:null, volume:null, muted:null, getCurrentTime:null, currentTime:null};
         this.time.unit = this.options.unit;
         Object.keys(this.options.action).forEach(actionName=>this.options.setAction(video, control, actionName));
         this.setPseudo(video, control);
         this.options.event.types.forEach(type=>window.addEventListener(type, this.controllerHandler, false));
         if (!!forwardedEvent && !!forwardedEvent.target) forwardedEvent.target.dispatchEvent(forwardedEvent);
     };
+    this.timeSaver = () => this.video.addEventListener('timeupdate', event=>{
+        let gv = +GM_getValue(location.href);
+        if (!gv) GM_setValue(location.href, event.target.currentTime);
+        if (!event.target.lastTime){
+            event.target.lastTime = 0;
+        } else if (event.target.currentTime < gv){
+            if (event.target.currentTime < event.target.lastTime && event.target.lastTime > 0) GM_setValue(location.href, event.target.currentTime); else this.options.action.set(gv);
+        } else if (event.target.currentTime > gv){
+            GM_setValue(location.href, event.target.currentTime);
+        }
+        event.target.lastTime = event.target.currentTime;
+    }, false);
     this.run = event => aGet('video:not(.hasController)').then(video=>{
         this.domain = document.domain;
-        if (typeof profile[profile.player[this.domain]] === 'object'){ Object.entries(profile.default).forEach(([option, value])=>{
-            this.options[option] = profile[profile.player[this.domain]][option] !== false && !profile[profile.player[this.domain]][option] ? value : typeof profile[profile.player[this.domain]][option] === 'object' ? Object.assign(value, profile[profile.player[this.domain]][option]) : profile[profile.player[this.domain]][option]
-            console.info('option %o = %o, profile[option] = %o', option, this.options[option], profile[profile.player[this.domain]][option]);
-        })} else Object.assign(this.options, profile.default);
+        if (typeof profile[profile.player[this.domain]] === 'object'){
+            Object.entries(profile.default).forEach(([option, value])=>(this.options[option] = profile[profile.player[this.domain]][option] !== false && !profile[profile.player[this.domain]][option] ? value : typeof profile[profile.player[this.domain]][option] === 'object' ? Object.assign(value, profile[profile.player[this.domain]][option]) : profile[profile.player[this.domain]][option]))
+        } else Object.assign(this.options, profile.default);
         this.options.valid = Object.keys(this.options.key);
         this.video = video;
         this.video.classList.add('hasController');
         console.info(this.options);
-        if (this.options.saveTime){
-            this.video.addEventListener('timeupdate', event=>{
-                let gv = +GM_getValue(location.href);
-                if (!gv) GM_setValue(location.href, event.target.currentTime);
-                if (!event.target.lastTime){
-                    event.target.lastTime = 0;
-                } else if (event.target.currentTime < gv){
-                    if (event.target.currentTime < event.target.lastTime && event.target.lastTime > 2 && event.target.currentTime > 2) GM_setValue(location.href, event.target.currentTime); else this.options.action.set(gv);
-                } else if (event.target.currentTime > gv){
-                    GM_setValue(location.href, event.target.currentTime);
-                }
-                event.target.lastTime = event.target.currentTime;
-            }, false);
-        }
+        if (this.options.saveTime) this.timeSaver();
         this.options.getControl(this.video).then(control=>{
             this.control = control;
             this.createController(!event ? null : event, this.video, this.control);
