@@ -33,6 +33,7 @@ const profile = {
             ' ': ['playpause']
         },
         saveTime: true,
+        blockContextMenu: true,
         ignore: 'button, [class*="jw-controls"]',
         getControl: video => new Promise(gotControl=>gotControl(video)),
         postAction:[{action: 'volume', args: [1.0]}, {action: 'muted', args: [false]}]
@@ -81,54 +82,45 @@ function kbControl(_controllerOptions){
                 wheel: event=>this.options.event.map[event.type][(1+Math.sign(event.deltaY))/2],
             },
         },
+        valid: {},
+        action: {},
         propAction: (target, propName) => value => (target[propName] = value),
         setAction: (video, control, actionName) => new Promise(gotTarget=>gotTarget([video, control].find(target=>actionName in target))).then(target=>(this.options.action[actionName] = !!target && typeof target[actionName] === 'function' ? target[actionName].bind(target) : this.options.propAction(target, actionName))),
     };
     this.setPseudo = (video, control) =>{
         this.options.action.speed = (...args) => this.options.action.playbackRate(this.speed(...args));
-        this.options.action.mod = (pressed, ...[standard, args]) => (this.options.mod.active[pressed] = {standard:standard, args:args, used:false});
+        this.options.action.mod = (pressed, ...[standard, args]) => (this.options.mod.active[pressed] = {standard:standard, args:args, used:!standard});
         this.options.action.set = (value) => (!this.options.action.seek.name ? this.options.action.currentTime : this.options.action.seek)(value*this.time.units[this.time._unit]);
         this.options.action.skip = (...args) => (!this.options.action.seek.name ? this.options.action.currentTime : this.options.action.seek)(this.skip(...args));
         this.options.action.playpause = () => video.paused ? this.options.action.play() : this.options.action.pause();
     };
-    this.controllerHandler = event => {if (!document.contains(this.video)) this.run(event); else if (!['mousedown', 'mouseup', 'wheel'].includes(event.type) || !event.path.some(el=>typeof el.matches === 'function' && el.matches(this.options.ignore))){
-        new Promise(gotKey=>new Promise(gotPressed=>gotPressed(this.options.event.converter[event.type](event))).then(pressed=>gotKey([pressed, ...this.options.key[pressed]]))).then(([pressed, action, ...args])=>{
-            if (this.options.valid.includes(pressed)){
-                if (action !== 'mod'){
-                    if (!event.type.endsWith('up')){
-                        let activeMod = Object.keys(this.options.mod.active)[0];
-                        //Only the first (by key order) active mod is considered in order to avoid overlap in the case that multiple mod keys are defined, pressed and affect the same keys
-                        if (!activeMod){
-                            console.info(pressed, action, args);
-                            this.options.action[action](...args);
-                        } else {
-                            [this.options.mod.active[activeMod].used, action, ...args] = [true, ...this.options.mod[activeMod][pressed]];
-                            console.info(pressed, action, args);
-                            this.options.action[action](...args);
-                        }
-                    }
-                } else {
-                    if (event.type.endsWith('up')){
-                        console.info(this.options.mod.active, pressed, this.options.mod.active[pressed]);
-                        if (!this.options.mod.active[pressed].used){
-                            console.info(pressed, action, args);
-                            this.options.action[this.options.mod.active[pressed].standard](this.options.mod.active[pressed].args);
-                        }
-                        delete this.options.mod.active[pressed]
-                    } else {
-                        this.options.action[action](pressed, ...args);
-                    }
+    this.handlers = {
+        mod: (event, pressed, action, args, keyup = event.type.endsWith('up'), l = console.log(event, pressed, action, args, keyup)) =>{
+            if (keyup){
+                if (!this.options.mod.active[pressed].used)this.options.action[this.options.mod.active[pressed].standard](this.options.mod.active[pressed].args);
+                delete this.options.mod.active[pressed];
+            } else this.options.action[action](pressed, ...args);
+        },
+        down:(event, pressed, action, args, activeMod, state = activeMod ? ([this.options.mod.active[activeMod].used, action, ...args] = [true, ...this.options.mod[activeMod][pressed]]) : void 0, l = console.log(event, pressed, action, args, activeMod, state)) => this.options.action[action](...args),
+    }
+    this.controllerHandler = (event, activeMod = Object.keys(this.options.mod.active)[0]) => {
+        if (!document.contains(this.video)) this.run(event); else if (!['mousedown', 'mouseup', 'wheel'].includes(event.type) || !event.path.some(el=>typeof el.matches === 'function' && el.matches(this.options.ignore))){
+            new Promise(gotKey=>new Promise(gotPressed=>gotPressed(this.options.event.converter[event.type](event))).then(pressed=>gotKey([pressed, ...this.options.key[pressed]]))).then(([pressed, action, ...args])=>{
+                if (this.options.valid[activeMod].includes(pressed)){
+                    action === 'mod' ? this.handlers.mod(event, pressed, action, args) : (!event.type.endsWith('up') ? this.handlers.down(event, pressed, action, args, activeMod) : void 0);
+                    this.options.postAction.forEach(post=>this.options.action[post.action](...post.args));
                 }
-            }
-            this.options.postAction.forEach(post=>this.options.action[post.action](...post.args));
-        });
-    }};
+            });
+        }
+    };
     this.createController = (forwardedEvent, video, control) => {
         this.options.action = {seek:null, play:null, pause:null, volume:null, muted:null, getCurrentTime:null, currentTime:null, playbackRate:null};
         this.time.unit = this.options.unit;
         Object.keys(this.options.action).forEach(actionName=>this.options.setAction(video, control, actionName));
         this.setPseudo(video, control);
         this.options.event.types.forEach(type=>window.addEventListener(type, this.controllerHandler, false));
+        //if (this.options.fullScreen){}
+        if (this.options.blockContextMenu) window.addEventListener('contextmenu', event=>/*event.path.includes(this.video) && */event.preventDefault(), false);
         if (!!forwardedEvent && !!forwardedEvent.target) forwardedEvent.target.dispatchEvent(forwardedEvent);
     };
     this.timeSaver = () => this.video.addEventListener('timeupdate', event=>{
@@ -148,7 +140,8 @@ function kbControl(_controllerOptions){
         if (typeof profile[profile.player[this.domain]] === 'object'){
             Object.entries(profile.default).forEach(([option, value])=>(this.options[option] = profile[profile.player[this.domain]][option] !== false && !profile[profile.player[this.domain]][option] ? value : typeof profile[profile.player[this.domain]][option] === 'object' ? Object.assign(value, profile[profile.player[this.domain]][option]) : profile[profile.player[this.domain]][option]))
         } else Object.assign(this.options, profile.default);
-        this.options.valid = Object.keys(this.options.key);
+        this.options.valid[void 0] = Object.keys(this.options.key);
+        Object.keys(this.options.mod).forEach(modkey => modkey !== 'active' ? (this.options.valid[modkey] = [modkey, ...Object.keys(this.options.mod[modkey])]) : void 0);
         this.video = video;
         this.video.classList.add('hasController');
         console.info(this.options);
