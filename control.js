@@ -68,8 +68,9 @@ function kbControl(_controllerOptions){
     };
     Object.defineProperty(this.time, 'unit', {set: input =>{this.time._unit = input}});
     Object.keys(this.time.sizes).forEach(size=>Object.defineProperty(this.time, size, {get: () => this.time.units[this.time._unit]*this.time.sizes[size]}));
-    this.skip = (offset, forward) => (!this.options.action.getCurrentTime.name ? this.video.currentTime*this.time.units[this.time._unit] : this.options.action.getCurrentTime())+((2*!!forward-1)*this.time[offset]);
-    this.speed = (reset, increase) => (!reset ? this.video.playbackRate+(0.1*(2*!!increase-1)) : 1.0);
+    this.skip = (offset, forward) => (!this.options.action.getCurrentTime.name ? this.video.currentTime*this.time.units[this.time._unit] : this.options.action.getCurrentTime())+((2*!!forward-1)*(offset.constructor === Number ? offset*this.time.units[this.time._unit] : this.time[offset]));
+    //this.speed = (reset, increase) => (!reset ? this.video.playbackRate*(0.5+increase+(0.5*increase)*(2*!!increase-1)) : 1.0);//(!reset ? this.video.playbackRate+(0.1*(2*!!increase-1)) : 1.0);
+    this.speed = (reset, increase) => (!reset ? this.video.playbackRate+((1/3)*(2*!!increase-1)) : 1.0);
     this.options = {
         event:{
             map: {mousedown: ['LMB', 'MMB', 'RMB'], mouseup: ['LMB', 'MMB', 'RMB'], wheel: ['WheelUp','WheelDown']},
@@ -93,18 +94,22 @@ function kbControl(_controllerOptions){
         this.options.action.set = (value) => (!this.options.action.seek.name ? this.options.action.currentTime : this.options.action.seek)(value*this.time.units[this.time._unit]);
         this.options.action.skip = (...args) => (!this.options.action.seek.name ? this.options.action.currentTime : this.options.action.seek)(this.skip(...args));
         this.options.action.playpause = () => video.paused ? this.options.action.play() : this.options.action.pause();
+        this.options.action.rotate = () => (video.style.transform = `rotate(${(+video.style.transform.slice(7, -4)+90)%360}deg)`);
     };
     this.handlers = {
         mod: (event, pressed, action, args, keyup = event.type.endsWith('up'), l = console.log(event, pressed, action, args, keyup)) =>{
             if (keyup){
-                if (!this.options.mod.active[pressed].used)this.options.action[this.options.mod.active[pressed].standard](this.options.mod.active[pressed].args);
+                if (!this.options.mod.active[pressed].used) this.options.action[this.options.mod.active[pressed].standard](this.options.mod.active[pressed].args); else {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
                 delete this.options.mod.active[pressed];
             } else this.options.action[action](pressed, ...args);
         },
         down:(event, pressed, action, args, activeMod, state = activeMod ? ([this.options.mod.active[activeMod].used, action, ...args] = [true, ...this.options.mod[activeMod][pressed]]) : void 0, l = console.log(event, pressed, action, args, activeMod, state)) => this.options.action[action](...args),
     }
     this.controllerHandler = (event, activeMod = Object.keys(this.options.mod.active)[0]) => {
-        if (!document.contains(this.video)) this.run(event); else if (!['mousedown', 'mouseup', 'wheel'].includes(event.type) || !event.path.some(el=>typeof el.matches === 'function' && el.matches(this.options.ignore))){
+        if (!document.contains(this.video)) this.run(event); else if ((this.options.fullScreen ? true : event.path.includes(this.video)) && (!['mousedown', 'mouseup', 'wheel'].includes(event.type) || !event.path.some(el=>typeof el.matches === 'function' && el.matches(this.options.ignore)))){
             new Promise(gotKey=>new Promise(gotPressed=>gotPressed(this.options.event.converter[event.type](event))).then(pressed=>gotKey([pressed, ...this.options.key[pressed]]))).then(([pressed, action, ...args])=>{
                 if (this.options.valid[activeMod].includes(pressed)){
                     action === 'mod' ? this.handlers.mod(event, pressed, action, args) : (!event.type.endsWith('up') ? this.handlers.down(event, pressed, action, args, activeMod) : void 0);
@@ -120,7 +125,28 @@ function kbControl(_controllerOptions){
         this.setPseudo(video, control);
         this.options.event.types.forEach(type=>window.addEventListener(type, this.controllerHandler, false));
         //if (this.options.fullScreen){}
-        if (this.options.blockContextMenu) window.addEventListener('contextmenu', event=>/*event.path.includes(this.video) && */event.preventDefault(), false);
+        let startType = void 0;
+        let pausesOnClick = void 0;
+        this.testClickHandler = event =>{
+            if (!startType){
+                startType = event.type;
+                video.click();
+            } else if (pausesOnClick === void 0){
+                if (!event.which){
+                    if (startType !== event.type){
+                        pausesOnClick = true;
+                        this.options.key.LMB[1] = void 0;
+                        this.options.action[startType === 'play' ? 'play' : 'pause']();
+                        ['play', 'pause'].forEach(type=>video.removeEventListener(type, this.testClickHandler, false));
+                    }
+                } else {
+                    pausesOnClick = false;
+                    ['play', 'pause'].forEach(type=>video.removeEventListener(type, this.testClickHandler, false));
+                }
+            }
+        }
+        ['play', 'pause'].forEach(type=>video.addEventListener(type, this.testClickHandler, false));
+        if (this.options.blockContextMenu) window.addEventListener('contextmenu', event=>event.path.includes(this.video) && event.preventDefault(), false);
         if (!!forwardedEvent && !!forwardedEvent.target) forwardedEvent.target.dispatchEvent(forwardedEvent);
     };
     this.timeSaver = () => this.video.addEventListener('timeupdate', event=>{
@@ -135,21 +161,25 @@ function kbControl(_controllerOptions){
         }
         event.target.lastTime = event.target.currentTime;
     }, false);
-    this.run = event => aGet('video:not(.hasController)').then(video=>{
-        this.domain = document.domain;
-        if (typeof profile[profile.player[this.domain]] === 'object'){
-            Object.entries(profile.default).forEach(([option, value])=>(this.options[option] = profile[profile.player[this.domain]][option] !== false && !profile[profile.player[this.domain]][option] ? value : typeof profile[profile.player[this.domain]][option] === 'object' ? Object.assign(value, profile[profile.player[this.domain]][option]) : profile[profile.player[this.domain]][option]))
-        } else Object.assign(this.options, profile.default);
-        this.options.valid[void 0] = Object.keys(this.options.key);
-        Object.keys(this.options.mod).forEach(modkey => modkey !== 'active' ? (this.options.valid[modkey] = [modkey, ...Object.keys(this.options.mod[modkey])]) : void 0);
-        this.video = video;
-        this.video.classList.add('hasController');
-        console.info(this.options);
-        if (this.options.saveTime) this.timeSaver();
-        this.options.getControl(this.video).then(control=>{
-            this.control = control;
-            this.createController(!event ? null : event, this.video, this.control);
-        });
+    this.run = event => aGet(':not(a) video:not(.hasController):not(.invalidForController)').then((video, _domain = (this.domain = document.domain), _profile = (this.profile = profile[profile.player[this.domain]]))=>{
+        if (!video.closest('a[href]')){
+            if (typeof this.profile === 'object'){
+                Object.entries(profile.default).forEach(([option, value])=>(this.options[option] = !this.profile.hasOwnProperty(option) ? value :(typeof this.profile[option] === 'object' ? Object.assign(value, this.profile[option]) : this.profile[option])));
+            } else Object.assign(this.options, profile.default);
+            this.options.valid[void 0] = Object.keys(this.options.key);
+            Object.keys(this.options.mod).forEach(modkey => modkey !== 'active' ? (this.options.valid[modkey] = [modkey, ...Object.keys(this.options.mod[modkey])]) : void 0);
+            this.video = video;
+            this.video.classList.add('hasController');
+            console.info(this.options);
+            if (this.options.saveTime) this.timeSaver();
+            this.options.getControl(this.video).then(control=>{
+                this.control = control;
+                this.createController(!event ? null : event, this.video, this.control);
+            });
+        } else {
+            video.classList.add('invalidForController');
+            this.run(event);
+        }
     });
     this.run();
 };
