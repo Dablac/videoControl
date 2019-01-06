@@ -32,6 +32,7 @@ const profile = {
             'ArrowDown': ['skip', 'big'],
             ' ': ['playpause']
         },
+        fullScreen: true,
         saveTime: true,
         blockContextMenu: true,
         ignore: 'button, [class*="jw-controls"]',
@@ -60,7 +61,7 @@ const profile = {
     }
 };
 
-function kbControl(_controllerOptions){
+function videoControl(_controllerOptions){
     this.time = {
         _unit: 'ms',
         units: {ms: 1000, s:1, m:(1/60)},
@@ -97,7 +98,7 @@ function kbControl(_controllerOptions){
         this.options.action.rotate = () => (video.style.transform = `rotate(${(+video.style.transform.slice(7, -4)+90)%360}deg)`);
     };
     this.handlers = {
-        mod: (event, pressed, action, args, keyup = event.type.endsWith('up'), l = console.log(event, pressed, action, args, keyup)) =>{
+        mod: (event, pressed, action, args, keyup = event.type.endsWith('up')) =>{
             if (keyup){
                 if (!this.options.mod.active[pressed].used) this.options.action[this.options.mod.active[pressed].standard](this.options.mod.active[pressed].args); else {
                     event.preventDefault();
@@ -106,7 +107,7 @@ function kbControl(_controllerOptions){
                 delete this.options.mod.active[pressed];
             } else this.options.action[action](pressed, ...args);
         },
-        down:(event, pressed, action, args, activeMod, state = activeMod ? ([this.options.mod.active[activeMod].used, action, ...args] = [true, ...this.options.mod[activeMod][pressed]]) : void 0, l = console.log(event, pressed, action, args, activeMod, state)) => this.options.action[action](...args),
+        down:(event, pressed, action, args, activeMod, state = activeMod ? ([this.options.mod.active[activeMod].used, action, ...args] = [true, ...this.options.mod[activeMod][pressed]]) : void 0) => this.options.action[action](...args),
     }
     this.controllerHandler = (event, activeMod = Object.keys(this.options.mod.active)[0]) => {
         if (!document.contains(this.video)) this.run(event); else if ((this.options.fullScreen ? true : event.path.includes(this.video)) && (!['mousedown', 'mouseup', 'wheel'].includes(event.type) || !event.path.some(el=>typeof el.matches === 'function' && el.matches(this.options.ignore)))){
@@ -161,7 +162,7 @@ function kbControl(_controllerOptions){
         }
         event.target.lastTime = event.target.currentTime;
     }, false);
-    this.run = event => aGet(':not(a) video:not(.hasController):not(.invalidForController)').then((video, _domain = (this.domain = document.domain), _profile = (this.profile = profile[profile.player[this.domain]]))=>{
+    this.run = event => aGet(':not(a) video:not(.hasVideoController):not(.invalidForVideoController)').then((video, _domain = (this.domain = document.domain), _profile = (this.profile = profile[profile.player[this.domain]]))=>{
         if (!video.closest('a[href]')){
             if (typeof this.profile === 'object'){
                 Object.entries(profile.default).forEach(([option, value])=>(this.options[option] = !this.profile.hasOwnProperty(option) ? value :(typeof this.profile[option] === 'object' ? Object.assign(value, this.profile[option]) : this.profile[option])));
@@ -169,7 +170,7 @@ function kbControl(_controllerOptions){
             this.options.valid[void 0] = Object.keys(this.options.key);
             Object.keys(this.options.mod).forEach(modkey => modkey !== 'active' ? (this.options.valid[modkey] = [modkey, ...Object.keys(this.options.mod[modkey])]) : void 0);
             this.video = video;
-            this.video.classList.add('hasController');
+            this.video.classList.add('hasVideoController');
             console.info(this.options);
             if (this.options.saveTime) this.timeSaver();
             this.options.getControl(this.video).then(control=>{
@@ -177,11 +178,11 @@ function kbControl(_controllerOptions){
                 this.createController(!event ? null : event, this.video, this.control);
             });
         } else {
-            video.classList.add('invalidForController');
+            video.classList.add('invalidForVideoController');
             this.run(event);
         }
     });
     this.run();
 };
 
-console.info('new %O', new kbControl());
+console.info('new %O', new videoControl());
