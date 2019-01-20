@@ -1,4 +1,4 @@
-# videoControl
+# VideoControl
 ### Universal keyboard and mouse video element controller.
 Designed for use in Google Chrome through a script manager such as TamperMonkey. Some features may not work correctly in other browsers or environments.
 
