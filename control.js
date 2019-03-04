@@ -3,7 +3,7 @@ const aGet = async (selector, target = document, r = target.querySelector(select
 function Layers(_storageKey){
     this.storageKey = !_storageKey ? location.pathname+location.search : _storageKey;
     this.bottom = false;
-    this.top = window.location === window.parent.location
+    this.top = window.location === window.parent.location;
     this.type = () => ['bottom', 'top', 'middle'][[this.bottom, this.top, !this.bottom && !this.top].indexOf(true)];
     this.pathDown = void 0;
     this.pathUp = void 0;
@@ -62,7 +62,7 @@ function Layers(_storageKey){
         this.gvCallback = callback;
         this.initStream(`getValue`);
     }
-    this.setBottom = (b = (this.bottom = true)) => !(this.flat = (this.top ? true : void 0 !== this.initStream(`assignBottom:${location.href}`)));
+    this.setBottom = () => (this.flat = (this.top ? true : void 0 !== this.initStream(`assignBottom:${location.href}`)));
     this.reset = () => this.initStream('reset');
 }
 
@@ -75,6 +75,8 @@ const profile = {
         'openload.co': 'videojs',
         'oload.download': 'videojs',
         'vidstreaming.io': 'videojs',
+        'vidlox.me': 'clappr',
+        'www.fembed.com': 'jwplayer',
     },
     default:{
         unit:'s',
@@ -108,17 +110,37 @@ const profile = {
         getControl: video => new Promise(gotControl=>gotControl(video)),
         postAction:[{action: 'volume', args: [1.0]}, {action: 'muted', args: [false]}]
     },
+    clappr:{
+        key:{
+            'ArrowRight': ['skip', 'tiny', true],
+            'ArrowLeft': ['skip', 'tiny'],
+            ' ': null,
+            'LMB': ['mod', null],
+        },
+        ignore: '.media-control *',
+    },
+    jwplayer:{
+        key:{
+            'ArrowRight': ['skip', 'tiny', true],
+            'ArrowLeft': ['skip', 'tiny'],
+            ' ': null,
+            'LMB': ['mod', null],
+        },
+        ignore: '.jw-controls *',
+    },
     videojs:{
         key:{
             'ArrowRight': ['skip', 'tiny', true],
             'ArrowLeft': ['skip', 'tiny'],
             ' ': null,
-            'LMB': null,
+            'LMB': ['mod', null],
         },
         ignore: '.vjs-control',
     },
     xplayer:{
         key:{
+            'ArrowRight': null,
+            'ArrowLeft': null,
             ' ': null,
             'LMB': ['mod', null],
         },
@@ -222,8 +244,9 @@ function videoControl(_controllerOptions){
     };
     this.layerTimeSaveHandler = event => this.layers.get((_time, time = +_time) => {
         if (!time) this.layers.set(event.target.currentTime);
-        if (!event.target.lastTime) event.target.lastTime = 0;
-        if (event.target.currentTime < time){
+        if (!event.target.lastTime){
+            event.target.lastTime = 0;
+        } else if (event.target.currentTime < time){
             if (event.target.currentTime < event.target.lastTime && event.target.lastTime > 0) this.layers.set(event.target.currentTime); else this.options.action.set(time);
         } else if (event.target.currentTime > time){
             this.layers.set(event.target.currentTime);
@@ -241,10 +264,10 @@ function videoControl(_controllerOptions){
             this.video = video;
             this.video.classList.add('hasVideoController');
             if (this.options.saveTime){
-                if (this.layers.setBottom()){
-                    this.layers.reset();
-                    this.timeSaveHandler({target: video}); //init with current video values
-                }
+                this.layers.bottom = true;
+                this.layers.reset();
+                this.layers.setBottom();
+                this.layerTimeSaveHandler({target: video}); //init with current video values
                 this.timeSaver(this.layers.flat);
             }
             this.options.getControl(this.video).then(control=>{
@@ -258,5 +281,4 @@ function videoControl(_controllerOptions){
     });
     this.run();
 };
-
 console.info('new %O at %o', new videoControl(), location.href);
