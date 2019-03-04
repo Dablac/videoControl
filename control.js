@@ -155,8 +155,8 @@ const profile = {
             ' ': null
         },
         saveTime: false,
-        ignore: '.bottom-controls, top-left-controls',
-        getControl: () => new Promise(gotPlayerInstance=>new Promise(gotVideoPlayer=>gotVideoPlayer(window.netflix.appContext.state.playerApp.getAPI().videoPlayer)).then(player=>gotPlayerInstance(player.getVideoPlayerBySessionId(player.getAllPlayerSessionIds()[0])))),
+        ignore: '.PlayerControlsNeo__core-controls *',
+        getControl: () => new Promise(gotPlayerInstance=>new Promise(gotVideoPlayer=>gotVideoPlayer(netflix.appContext.state.playerApp.getAPI().videoPlayer)).then(player=>gotPlayerInstance(player.getVideoPlayerBySessionId(player.getAllPlayerSessionIds()[0])))),
     }
 };
 
@@ -281,4 +281,5 @@ function videoControl(_controllerOptions){
     });
     this.run();
 };
+
 console.info('new %O at %o', new videoControl(), location.href);
