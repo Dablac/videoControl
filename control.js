@@ -228,8 +228,8 @@ function videoControl(_controllerOptions){
         this.time.unit = this.options.unit;
         Object.keys(this.options.action).forEach(actionName=>this.options.setAction(video, control, actionName));
         this.setPseudo(video, control);
-        this.options.event.types.forEach(type=>window.addEventListener(type, this.controllerHandler, false));
-        if (this.options.blockContextMenu) video.addEventListener('contextmenu', event => event.preventDefault(), false);
+        this.options.event.types.forEach(type=>window.addEventListener(type, this.controllerHandler, {passive: false}));
+        if (this.options.blockContextMenu) video.addEventListener('contextmenu', event => event.preventDefault(), {passive: false});
         if (!!forwardedEvent && !!forwardedEvent.target) forwardedEvent.target.dispatchEvent(forwardedEvent);
     };
     this.flatTimeSaveHandler = (event, time = +localStorage[this.storageKey]) => {
