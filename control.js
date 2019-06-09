@@ -1,5 +1,7 @@
 const aGet = async (selector, target = document, r = target.querySelector(selector)) => await new Promise((p,f)=>requestAnimationFrame(()=>(!r?f:p)(r))).catch(r=>aGet(selector, target, target.querySelector(selector)));
 
+const simClick = targetNode => ["mouseover", "mousedown", "mouseup", "click"].forEach((type, i, a, evt = document.createEvent('MouseEvents'), _init = evt.initEvent(type, true, true))=>targetNode.dispatchEvent(evt));
+
 function Layers(_storageKey){
     this.storageKey = !_storageKey ? location.pathname+location.search : _storageKey;
     this.bottom = false;
@@ -38,7 +40,7 @@ function Layers(_storageKey){
                         this.initStream(`getValue:${!this._getValue() ? 0 : this._getValue()}`);
                         break;
                     case (obj.data.startsWith('getValue:')):
-                        this.gvCallback(obj.data.slice(9));
+                        if (!!this.gvCallback) this.gvCallback(obj.data.slice(9));
                         break;
                     default:
                         throw new Error('no default case allowed; unknown error in layer switch-case statement');
@@ -65,7 +67,6 @@ function Layers(_storageKey){
     this.setBottom = () => (this.flat = (this.top ? true : void 0 !== this.initStream(`assignBottom:${location.href}`)));
     this.reset = () => this.initStream('reset');
 }
-
 
 const profile = {
     player:{
@@ -127,6 +128,10 @@ const profile = {
             'LMB': ['mod', null],
         },
         ignore: '.jw-controls *',
+        getControl: (video) =>new Promise(gotControl=>{
+            video.addEventListener('play',event=>simClick(Array.prototype.find.call(document.querySelectorAll('.jw-settings-content-item'), button=>button.textContent.includes(['1080p', '720p', '480p', '360p'].find(q=>Array.prototype.find.call(document.querySelectorAll('.jw-settings-content-item'), button=>button.textContent.includes(q)))))), false);
+            gotControl(video)
+        })
     },
     videojs:{
         key:{
@@ -172,7 +177,7 @@ function videoControl(_controllerOptions){
     Object.keys(this.time.sizes).forEach(size=>Object.defineProperty(this.time, size, {get: () => this.time.units[this.time._unit]*this.time.sizes[size]}));
     this.skip = (offset, forward) => (!this.options.action.getCurrentTime.name ? this.video.currentTime*this.time.units[this.time._unit] : this.options.action.getCurrentTime())+((2*!!forward-1)*(offset.constructor === Number ? offset*this.time.units[this.time._unit] : this.time[offset]));
     //this.speed = (reset, increase) => (!reset ? this.video.playbackRate*(0.5+increase+(0.5*increase)*(2*!!increase-1)) : 1.0);//(!reset ? this.video.playbackRate+(0.1*(2*!!increase-1)) : 1.0);
-    this.speed = (reset, increase) => (!reset ? this.video.playbackRate+((1/3)*(2*!!increase-1)) : 1.0);
+    this.speed = (reset, increase, _magnitude = 0.25, l = console.log(reset, increase, this.video.playbackRate, !reset ? this.video.playbackRate+(_magnitude*(2*!!increase-1)) : 1.0)) => (!reset ? this.video.playbackRate+(_magnitude*(2*!!increase-1)) : 1.0);
     this.options = {
         event:{
             map: {mousedown: ['LMB', 'MMB', 'RMB'], mouseup: ['LMB', 'MMB', 'RMB'], wheel: ['WheelUp','WheelDown']},
@@ -212,7 +217,9 @@ function videoControl(_controllerOptions){
     }
     this.controllerHandler = (event, activeMod = Object.keys(this.options.mod.active)[0], hitVideo = event.constructor === KeyboardEvent || (this.options.fullScreen ? true : event.path.includes(this.video)), hitIgnore = (hitVideo && event.path.some(el=>typeof el.matches === 'function' && el.matches(this.options.ignore)))) => {
         if (hitVideo && event.constructor === WheelEvent) event.preventDefault();
-        if (!document.contains(this.video)){
+        let iv = this.invalidate(this.video);
+        console.log('invalid: %o [%o, %o, %o]', iv, !document.contains(this.video), !this.video.parentElement, !Number.isFinite(1/this.video.duration));
+        if (iv){
             this.run(event);
         } else if (hitVideo && !hitIgnore){
             new Promise(gotKey=>new Promise(gotPressed=>gotPressed(this.options.event.converter[event.type](event))).then(pressed=>gotKey([pressed, ...this.options.key[pressed]]))).then(([pressed, action, ...args])=>{
@@ -253,9 +260,13 @@ function videoControl(_controllerOptions){
         }
         event.target.lastTime = event.target.currentTime;
     });
+    this.live = document.getElementsByTagName('video');
+    this.isPlaying = video => video.readyState > 2 && !video.paused && !video.ended && video.currentTime > Number.EPSILON;
+    this.getVideo = (fromLive = Array.prototype.find.call(this.live, this.isPlaying)) => !fromLive ? aGet(':not(a) video:not(.hasVideoController):not(.invalidForVideoController)') : new Promise(gotFromLive=>gotFromLive(fromLive));
+    this.invalidate = video => [document.contains(video), video.parentElement, Number.isFinite(1/video.duration), !video.closest('a[href]')].some(condition=>!condition);
     this.timeSaver = flat => this.video.addEventListener('timeupdate', flat ? this.flatTimeSaveHandler : this.layerTimeSaveHandler, false);
-    this.run = event => aGet(':not(a) video:not(.hasVideoController):not(.invalidForVideoController)').then((video, _domain = (this.domain = document.domain), _profile = (this.profile = profile[profile.player[this.domain]]))=>{
-        if (!video.closest('a[href]')){
+    this.run = event => this.getVideo().then((video, _domain = (this.domain = document.domain), _profile = (this.profile = profile[profile.player[this.domain]]))=>{
+        if (!this.invalidate(video)){
             if (typeof this.profile === 'object'){
                 Object.entries(profile.default).forEach(([option, value])=>(this.options[option] = !this.profile.hasOwnProperty(option) ? value :(typeof this.profile[option] === 'object' ? Object.assign(value, this.profile[option]) : this.profile[option])));
             } else Object.assign(this.options, profile.default);
@@ -271,6 +282,7 @@ function videoControl(_controllerOptions){
                 this.timeSaver(this.layers.flat);
             }
             this.options.getControl(this.video).then(control=>{
+                video.videoController = this;
                 this.control = control;
                 this.createController(!event ? null : event, this.video, this.control);
             });
