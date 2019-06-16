@@ -217,9 +217,7 @@ function videoControl(_controllerOptions){
     }
     this.controllerHandler = (event, activeMod = Object.keys(this.options.mod.active)[0], hitVideo = event.constructor === KeyboardEvent || (this.options.fullScreen ? true : event.path.includes(this.video)), hitIgnore = (hitVideo && event.path.some(el=>typeof el.matches === 'function' && el.matches(this.options.ignore)))) => {
         if (hitVideo && event.constructor === WheelEvent) event.preventDefault();
-        let iv = this.invalidate(this.video);
-        console.log('invalid: %o [%o, %o, %o]', iv, !document.contains(this.video), !this.video.parentElement, !Number.isFinite(1/this.video.duration));
-        if (iv){
+        if (this.invalidate(this.video)){
             this.run(event);
         } else if (hitVideo && !hitIgnore){
             new Promise(gotKey=>new Promise(gotPressed=>gotPressed(this.options.event.converter[event.type](event))).then(pressed=>gotKey([pressed, ...this.options.key[pressed]]))).then(([pressed, action, ...args])=>{
@@ -260,37 +258,35 @@ function videoControl(_controllerOptions){
         }
         event.target.lastTime = event.target.currentTime;
     });
-    this.live = document.getElementsByTagName('video');
-    this.isPlaying = video => video.readyState > 2 && !video.paused && !video.ended && video.currentTime > Number.EPSILON;
-    this.getVideo = (fromLive = Array.prototype.find.call(this.live, this.isPlaying)) => !fromLive ? aGet(':not(a) video:not(.hasVideoController):not(.invalidForVideoController)') : new Promise(gotFromLive=>gotFromLive(fromLive));
-    this.invalidate = video => [document.contains(video), video.parentElement, Number.isFinite(1/video.duration), !video.closest('a[href]')].some(condition=>!condition);
+    this.liveVideo = document.getElementsByTagName('video');
+    this.liveInvalid = document.getElementsByClassName('invalidForVideoController');
+    this.isPlayable = video => video.readyState > 2 && !video.ended
+    this.isPlaying = video => this.isPlayable(video) && !video.paused && video.currentTime > Number.EPSILON
+    this.getVideo = (_event, fromLive = Array.prototype.find.call(Array.prototype.filter.call(this.liveVideo, vid => !Array.prototype.includes.call(this.liveInvalid, vid)), this.isPlaying)) => this.validate(_event, !fromLive ? aGet(':not(a) video:not(.hasVideoController):not(.invalidForVideoController)') : new Promise(gotFromLive=>gotFromLive(fromLive)));
+    this.validate = (_event, promise) => new Promise((valid, invalid)=>promise.then(video=>!this.invalidate(video) ? valid(video) : invalid(video))).catch(invalidVid=>invalidVid.classList.add('invalidForVideoController'));
+    this.invalidate = video => [video instanceof HTMLVideoElement, document.contains(video), video.parentElement, !video.closest('a[href]')].some(condition=>!condition);
     this.timeSaver = flat => this.video.addEventListener('timeupdate', flat ? this.flatTimeSaveHandler : this.layerTimeSaveHandler, false);
-    this.run = event => this.getVideo().then((video, _domain = (this.domain = document.domain), _profile = (this.profile = profile[profile.player[this.domain]]))=>{
-        if (!this.invalidate(video)){
-            if (typeof this.profile === 'object'){
-                Object.entries(profile.default).forEach(([option, value])=>(this.options[option] = !this.profile.hasOwnProperty(option) ? value :(typeof this.profile[option] === 'object' ? Object.assign(value, this.profile[option]) : this.profile[option])));
-            } else Object.assign(this.options, profile.default);
-            this.options.valid[void 0] = Object.keys(this.options.key);
-            Object.keys(this.options.mod).forEach(modkey => modkey !== 'active' ? (this.options.valid[modkey] = [modkey, ...Object.keys(this.options.mod[modkey])]) : void 0);
-            this.video = video;
-            this.video.classList.add('hasVideoController');
-            if (this.options.saveTime){
-                this.layers.bottom = true;
-                this.layers.reset();
-                this.layers.setBottom();
-                this.layerTimeSaveHandler({target: video}); //init with current video values
-                this.timeSaver(this.layers.flat);
-            }
-            this.options.getControl(this.video).then(control=>{
-                video.videoController = this;
-                this.control = control;
-                this.createController(!event ? null : event, this.video, this.control);
-            });
-        } else {
-            video.classList.add('invalidForVideoController');
-            this.run(event);
+    this.run = event => this.getVideo(event).then(video=>new Promise((gotVideo, noVideo)=>!video ? noVideo(this.run.bind(this, event)) : gotVideo(video)).catch(requestAnimationFrame).then((video, _domain = (this.domain = document.domain), _profile = (this.profile = profile[profile.player[this.domain]]))=>{
+        if (typeof this.profile === 'object'){
+            Object.entries(profile.default).forEach(([option, value])=>(this.options[option] = !this.profile.hasOwnProperty(option) ? value :(typeof this.profile[option] === 'object' ? Object.assign(value, this.profile[option]) : this.profile[option])));
+        } else Object.assign(this.options, profile.default);
+        this.options.valid[void 0] = Object.keys(this.options.key);
+        Object.keys(this.options.mod).forEach(modkey => modkey !== 'active' ? (this.options.valid[modkey] = [modkey, ...Object.keys(this.options.mod[modkey])]) : void 0);
+        this.video = video;
+        this.video.classList.add('hasVideoController');
+        if (this.options.saveTime){
+            this.layers.bottom = true;
+            this.layers.reset();
+            this.layers.setBottom();
+            this.layerTimeSaveHandler({target: video}); //init with current video values
+            this.timeSaver(this.layers.flat);
         }
-    });
+        this.options.getControl(this.video).then(control=>{
+            video.videoController = this;
+            this.control = control;
+            this.createController(!event ? null : event, this.video, this.control);
+        });
+    }));
     this.run();
 };
 
